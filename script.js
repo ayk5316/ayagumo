@@ -3,6 +3,7 @@ const APP_CONFIG = {
   mapZoom: 7,
   analysisZoom: 7,
   refreshIntervalMs: 5 * 60 * 1000,
+  locationClusterOffset: 0.015,
   rainViewerUrl: "https://api.rainviewer.com/public/weather-maps.json",
   regionSamples: [
     { lat: 34.6937, lon: 135.5023 }, // 大阪市中心部
@@ -60,14 +61,19 @@ const state = {
   frameHost: "",
   tileCache: new Map(),
   refreshTimer: null,
+  userLocation: null,
+  analysisMode: "region",
 };
 
 const dom = {
   avatarImage: document.getElementById("avatarImage"),
   avatarComment: document.getElementById("avatarComment"),
+  locationLabel: document.getElementById("locationLabel"),
+  locationText: document.getElementById("locationText"),
   statusText: document.getElementById("statusText"),
   updatedAt: document.getElementById("updatedAt"),
   refreshButton: document.getElementById("refreshButton"),
+  useLocationButton: document.getElementById("useLocationButton"),
   mapFrameLabel: document.getElementById("mapFrameLabel"),
   timelineButtons: Array.from(document.querySelectorAll(".meter-item")),
 };
@@ -75,6 +81,7 @@ const dom = {
 document.addEventListener("DOMContentLoaded", () => {
   setupMap();
   bindEvents();
+  setupLocation();
   refreshWeather();
   state.refreshTimer = window.setInterval(refreshWeather, APP_CONFIG.refreshIntervalMs);
 });
@@ -101,6 +108,10 @@ function setupMap() {
 function bindEvents() {
   dom.refreshButton.addEventListener("click", () => {
     refreshWeather();
+  });
+
+  dom.useLocationButton.addEventListener("click", () => {
+    requestUserLocation();
   });
 
   dom.timelineButtons.forEach((button) => {
@@ -135,9 +146,7 @@ async function refreshWeather() {
     state.frameHost = payload.host || "https://tilecache.rainviewer.com";
     state.tileCache.clear();
 
-    const snapshots = await Promise.all(
-      TIME_SLOTS.map((slot) => buildSnapshot(slot, frames, state.frameHost))
-    );
+    const snapshots = await Promise.all(TIME_SLOTS.map((slot) => buildSnapshot(slot, frames, state.frameHost)));
 
     state.snapshots = snapshots;
     renderForecast(snapshots);
@@ -200,10 +209,44 @@ function pickFrameForTime(frames, minutesAhead) {
 }
 
 async function analyzeFrame(frame, host) {
+  const analysis = getAnalysisPoints();
   const sampleResults = await Promise.all(
-    APP_CONFIG.regionSamples.map((point) => samplePointFromFrame(frame, host, point))
+    analysis.points.map((point) => samplePointFromFrame(frame, host, point))
   );
 
+  state.analysisMode = analysis.mode;
+
+  if (analysis.mode === "current") {
+    return pickSignalForCurrentLocation(sampleResults);
+  }
+
+  return pickSignalForRegion(sampleResults);
+}
+
+function getAnalysisPoints() {
+  if (state.userLocation) {
+    const { lat, lon } = state.userLocation;
+    const offset = APP_CONFIG.locationClusterOffset;
+
+    return {
+      mode: "current",
+      points: [
+        { lat, lon },
+        { lat: lat + offset, lon },
+        { lat: lat - offset, lon },
+        { lat, lon: lon + offset },
+        { lat, lon: lon - offset },
+      ],
+    };
+  }
+
+  return {
+    mode: "region",
+    points: APP_CONFIG.regionSamples,
+  };
+}
+
+function pickSignalForRegion(sampleResults) {
   const strongest = Math.max(...sampleResults.map((result) => result.rank));
   const mediumCount = sampleResults.filter((result) => result.rank >= 1).length;
   const strongCount = sampleResults.filter((result) => result.rank >= 2).length;
@@ -217,6 +260,22 @@ async function analyzeFrame(frame, host) {
   }
 
   return strongest >= 1 ? "soon" : "safe";
+}
+
+function pickSignalForCurrentLocation(sampleResults) {
+  const [center, ...surroundings] = sampleResults;
+  const nearbyWet = surroundings.filter((result) => result.rank >= 1).length;
+  const nearbyStrong = surroundings.filter((result) => result.rank >= 2).length;
+
+  if (center.rank >= 2) {
+    return "rain";
+  }
+
+  if (center.rank >= 1 || nearbyStrong >= 1 || nearbyWet >= 2) {
+    return "soon";
+  }
+
+  return "safe";
 }
 
 async function samplePointFromFrame(frame, host, point) {
@@ -256,7 +315,7 @@ async function getTileCanvas(frame, host, zoom, tileX, tileY) {
     return state.tileCache.get(key);
   }
 
-  const url = `${host}${frame.path}/256/${zoom}/${tileX}/${tileY}/2/1_1.png`;
+  const url = `${host}${frame.path}/256/${zoom}/${tileX}/${tileY}/2/0_0.png`;
   const response = await fetch(url, { cache: "force-cache" });
 
   if (response.status === 404) {
@@ -317,6 +376,7 @@ function renderForecast(snapshots) {
   dom.avatarImage.src = avatar.image;
   dom.avatarComment.textContent = avatar.comment;
   setStatus(buildStatusLine(pattern, snapshots));
+  renderLocationInfo(pattern, snapshots);
 
   dom.timelineButtons.forEach((button, index) => {
     const snapshot = snapshots[index];
@@ -351,16 +411,53 @@ function choosePattern(snapshots) {
 
 function buildStatusLine(pattern, snapshots) {
   const labels = snapshots.map((snapshot) => snapshot.slot.label).join(" / ");
+  const target = state.analysisMode === "current" ? "現在地" : "大阪市内〜東大阪";
 
   switch (pattern) {
     case "safe":
-      return `${labels} を見ても大きな雨雲は近づいていません`;
+      return `${target}は ${labels} を見ても大きな雨雲は近づいていません`;
     case "soonRain":
-      return `今は大丈夫ですが、このあと大阪東側へ雨雲が近づく見込みです`;
+      return state.analysisMode === "current"
+        ? "現在地は今は大丈夫ですが、このあと雨雲が近づく見込みです"
+        : "今は大丈夫ですが、このあと大阪東側へ雨雲が近づく見込みです";
     case "soonClear":
-      return `いまの雨は短めで、1時間後には落ち着く見込みです`;
+      return state.analysisMode === "current"
+        ? "現在地の雨は短めで、1時間後には落ち着く見込みです"
+        : "いまの雨は短めで、1時間後には落ち着く見込みです";
     default:
-      return `大阪市内から東大阪にかけて、しばらく雨が残る見込みです`;
+      return state.analysisMode === "current"
+        ? "現在地では、しばらく雨が続く見込みです"
+        : "大阪市内から東大阪にかけて、しばらく雨が残る見込みです";
+  }
+}
+
+function renderLocationInfo(pattern, snapshots) {
+  if (state.userLocation) {
+    dom.locationLabel.textContent = "現在地ピンポイント";
+    dom.locationText.textContent = buildLocationLine(pattern, snapshots);
+    dom.useLocationButton.textContent = "現在地を更新";
+    return;
+  }
+
+  dom.locationLabel.textContent = "広域モード";
+  dom.locationText.textContent = "現在地を使うと、この場所で雨が降るかどうかをピンポイントで見られます。";
+  dom.useLocationButton.textContent = "現在地を使う";
+}
+
+function buildLocationLine(pattern, snapshots) {
+  const timeSummary = snapshots
+    .map((snapshot) => `${snapshot.slot.label} ${SIGNAL_META[snapshot.signal].label}`)
+    .join(" / ");
+
+  switch (pattern) {
+    case "safe":
+      return `現在地は ${timeSummary}。いまのところ傘なしで動けそうです。`;
+    case "soonRain":
+      return `現在地は ${timeSummary}。近いうちに降り始めそうです。`;
+    case "soonClear":
+      return `現在地は ${timeSummary}。この雨はもうすぐ抜けそうです。`;
+    default:
+      return `現在地は ${timeSummary}。しばらく雨を見込んだほうがよさそうです。`;
   }
 }
 
@@ -416,6 +513,8 @@ function renderErrorState() {
   dom.avatarComment.textContent = AVATAR_PATTERNS.error.comment;
   setStatus("地図は表示できますが、雨雲データの取得に失敗しました");
   dom.updatedAt.textContent = "最終更新: 取得失敗";
+  dom.locationLabel.textContent = state.userLocation ? "現在地ピンポイント" : "広域モード";
+  dom.locationText.textContent = "雨雲データを読めなかったため、いまは予測を更新できません。";
 
   dom.timelineButtons.forEach((button) => {
     const dot = button.querySelector("[data-dot]");
@@ -435,4 +534,59 @@ function setUpdatedTime(date) {
     minute: "2-digit",
   });
   dom.updatedAt.textContent = `最終更新: ${time}`;
+}
+
+function setupLocation() {
+  if (!("geolocation" in navigator)) {
+    dom.locationText.textContent = "この端末では現在地が使えないため、広域の雨雲情報を表示しています。";
+    dom.useLocationButton.disabled = true;
+    return;
+  }
+
+  if ("permissions" in navigator && navigator.permissions?.query) {
+    navigator.permissions
+      .query({ name: "geolocation" })
+      .then((result) => {
+        if (result.state === "granted") {
+          requestUserLocation(false);
+        }
+      })
+      .catch(() => {
+        // 何もしない
+      });
+  }
+}
+
+function requestUserLocation(showLoading = true) {
+  if (!("geolocation" in navigator)) {
+    return;
+  }
+
+  dom.useLocationButton.disabled = true;
+
+  if (showLoading) {
+    dom.locationLabel.textContent = "現在地ピンポイント";
+    dom.locationText.textContent = "現在地を取得しています…";
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      state.userLocation = {
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+      };
+      dom.useLocationButton.disabled = false;
+      refreshWeather();
+    },
+    () => {
+      dom.useLocationButton.disabled = false;
+      dom.locationLabel.textContent = "広域モード";
+      dom.locationText.textContent = "現在地が取得できなかったため、大阪の広域予測を表示しています。";
+    },
+    {
+      enableHighAccuracy: false,
+      timeout: 8000,
+      maximumAge: 10 * 60 * 1000,
+    }
+  );
 }

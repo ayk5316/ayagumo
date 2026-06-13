@@ -127,6 +127,39 @@ textarea {
   word-break: keep-all;
 }
 
+.location-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.7);
+}
+
+.location-copy {
+  min-width: 0;
+}
+
+.location-label,
+.location-text {
+  margin: 0;
+}
+
+.location-label {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.location-text {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .meta-row,
 .section-head {
   display: flex;
@@ -289,6 +322,11 @@ textarea {
 
   .meta-row,
   .section-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .location-panel {
     flex-direction: column;
     align-items: flex-start;
   }
