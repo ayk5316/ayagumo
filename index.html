@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>大阪ミニマル雨雲レーダー</title>
+    <meta
+      name="description"
+      content="大阪市内から東大阪エリアの雨雲を、アバターの表情とひとことで直感的に伝えるミニマルな雨雲レーダーアプリ。"
+    />
+    <link rel="preconnect" href="https://unpkg.com" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-card">
+        <div class="avatar-wrap">
+          <img
+            id="avatarImage"
+            class="avatar-image"
+            src="./assets/IMG_4692.JPG"
+            alt="雨予報アバター"
+            width="112"
+            height="112"
+          />
+        </div>
+
+        <div class="hero-copy">
+          <p class="eyebrow">大阪市内〜東大阪</p>
+          <div class="speech">
+            <p id="avatarComment">よみこみ中…</p>
+          </div>
+          <div class="meta-row">
+            <span id="mapFrameLabel">地図: 今</span>
+            <button id="refreshButton" class="ghost-button" type="button">更新</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="meter-card" aria-labelledby="meterTitle">
+        <div class="section-head">
+          <h1 id="meterTitle">未来の予測</h1>
+          <p id="statusText">RainViewerのデータを確認しています</p>
+        </div>
+
+        <div class="timeline" role="tablist" aria-label="時間ごとの雨予測">
+          <button class="meter-item is-active" id="slot-now" data-index="0" type="button" role="tab">
+            <span class="meter-time">今</span>
+            <span class="meter-dot dot-safe" data-dot></span>
+            <span class="meter-caption" data-caption>雨なし</span>
+          </button>
+
+          <button class="meter-item" id="slot-30" data-index="1" type="button" role="tab">
+            <span class="meter-time">30分後</span>
+            <span class="meter-dot dot-safe" data-dot></span>
+            <span class="meter-caption" data-caption>雨なし</span>
+          </button>
+
+          <button class="meter-item" id="slot-60" data-index="2" type="button" role="tab">
+            <span class="meter-time">1時間後</span>
+            <span class="meter-dot dot-safe" data-dot></span>
+            <span class="meter-caption" data-caption>雨なし</span>
+          </button>
+        </div>
+
+        <p class="hint-text">タップすると地図の雨雲レイヤーもその時間に切り替わります。</p>
+      </section>
+
+      <section class="map-card" aria-labelledby="mapTitle">
+        <div class="section-head">
+          <h2 id="mapTitle">大阪エリアの地図</h2>
+          <p id="updatedAt">最終更新: --:--</p>
+        </div>
+
+        <div id="map" class="map-view" aria-label="大阪市内から東大阪エリアの地図"></div>
+      </section>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./script.js"></script>
+  </body>
+</html>

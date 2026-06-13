@@ -1,0 +1,269 @@
+:root {
+  --bg: #ffffff;
+  --text: #141414;
+  --muted: #6b7280;
+  --line: rgba(17, 24, 39, 0.12);
+  --line-strong: rgba(17, 24, 39, 0.22);
+  --shadow: 0 20px 50px rgba(17, 24, 39, 0.06);
+  --safe: #2f80ed;
+  --soon: #d39a22;
+  --rain: #b74b4b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI",
+    "Yu Gothic", "Noto Sans JP", sans-serif;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  width: min(100%, 460px);
+  margin: 0 auto;
+  padding: 20px 16px 28px;
+}
+
+.hero-card,
+.meter-card,
+.map-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+.hero-card {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 18px;
+}
+
+.avatar-wrap {
+  width: 112px;
+  height: 112px;
+  display: grid;
+  place-items: center;
+}
+
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.hero-copy {
+  min-width: 0;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.speech {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  min-height: 74px;
+  display: flex;
+  align-items: center;
+}
+
+.speech p {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  word-break: keep-all;
+}
+
+.meta-row,
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.meta-row {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ghost-button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.ghost-button:hover,
+.ghost-button:focus-visible {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.ghost-button:focus-visible,
+.meter-item:focus-visible {
+  outline: 2px solid rgba(47, 128, 237, 0.28);
+  outline-offset: 2px;
+}
+
+.meter-card,
+.map-card {
+  margin-top: 14px;
+  padding: 18px;
+}
+
+.section-head {
+  margin-bottom: 14px;
+}
+
+.section-head h1,
+.section-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.section-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.meter-item {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 22px;
+  padding: 16px 10px 14px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.meter-item:hover,
+.meter-item.is-active {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px rgba(17, 24, 39, 0.05);
+}
+
+.meter-time,
+.meter-caption {
+  display: block;
+}
+
+.meter-time {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.meter-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: block;
+  margin: 12px auto 10px;
+  background: var(--safe);
+}
+
+.meter-caption {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.dot-safe {
+  background: var(--safe);
+}
+
+.dot-soon {
+  background: var(--soon);
+}
+
+.dot-rain {
+  background: var(--rain);
+}
+
+.hint-text {
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.map-view {
+  width: 100%;
+  height: 46vh;
+  min-height: 360px;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.leaflet-container {
+  background: #f8fafc;
+}
+
+.leaflet-control-attribution {
+  font-size: 10px;
+}
+
+@media (max-width: 399px) {
+  .hero-card {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .meta-row,
+  .section-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .section-head p {
+    text-align: left;
+  }
+
+  .speech {
+    min-height: auto;
+  }
+}
