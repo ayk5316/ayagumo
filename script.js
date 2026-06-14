@@ -1,10 +1,11 @@
 const APP_CONFIG = {
   center: [34.6903, 135.5663],
   mapZoom: 7,
-  analysisZoom: 7,
+  analysisZoom: 10,
   refreshIntervalMs: 5 * 60 * 1000,
-  locationClusterOffset: 0.015,
-  rainViewerUrl: "https://api.rainviewer.com/public/weather-maps.json",
+  refreshLeadSeconds: 20,
+  locationClusterOffset: 0.008,
+  jmaTileBaseUrl: "https://www.jma.go.jp/bosai/jmatile/data/nowc",
   regionSamples: [
     { lat: 34.6937, lon: 135.5023 }, // 大阪市中心部
     { lat: 34.7024, lon: 135.5400 }, // 城東〜鶴見
@@ -52,17 +53,19 @@ const TIME_SLOTS = [
   { label: "1時間後", minutes: 60 },
 ];
 
+const MONITOR_MINUTES = Array.from({ length: 12 }, (_, index) => (index + 1) * 5);
+
 const state = {
   map: null,
   radarLayer: null,
-  frames: [],
   snapshots: [],
   activeIndex: 0,
-  frameHost: "",
   tileCache: new Map(),
   refreshTimer: null,
   userLocation: null,
   analysisMode: "region",
+  strongAlert: false,
+  currentBaseTimeId: "",
 };
 
 const dom = {
@@ -83,13 +86,14 @@ document.addEventListener("DOMContentLoaded", () => {
   bindEvents();
   setupLocation();
   refreshWeather();
-  state.refreshTimer = window.setInterval(refreshWeather, APP_CONFIG.refreshIntervalMs);
+  scheduleAutoRefresh();
 });
 
 function setupMap() {
   state.map = L.map("map", {
     zoomControl: false,
     preferCanvas: true,
+    maxZoom: 20,
   }).setView(APP_CONFIG.center, APP_CONFIG.mapZoom);
 
   L.control
@@ -98,10 +102,11 @@ function setupMap() {
     })
     .addTo(state.map);
 
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: "abcd",
-    maxZoom: 19,
+    maxZoom: 20,
   }).addTo(state.map);
 }
 
@@ -123,32 +128,24 @@ function bindEvents() {
 }
 
 async function refreshWeather() {
-  setStatus("RainViewerのデータを確認しています");
+  setStatus("気象庁ナウキャストを確認しています");
   dom.refreshButton.disabled = true;
 
   try {
-    const response = await fetch(`${APP_CONFIG.rainViewerUrl}?_=${Date.now()}`, {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const frames = collectFrames(payload);
-
-    if (!frames.length) {
-      throw new Error("フレームが見つかりません");
-    }
-
-    state.frames = frames;
-    state.frameHost = payload.host || "https://tilecache.rainviewer.com";
+    const baseTime = getLatestBaseTimeUtc();
+    const baseTimeId = formatJmaTimestamp(baseTime);
+    state.currentBaseTimeId = baseTimeId;
     state.tileCache.clear();
 
-    const snapshots = await Promise.all(TIME_SLOTS.map((slot) => buildSnapshot(slot, frames, state.frameHost)));
+    const snapshots = await Promise.all(
+      TIME_SLOTS.map((slot) => buildSnapshot(slot, baseTime))
+    );
+    const monitorResults = await Promise.all(
+      MONITOR_MINUTES.map((minutes) => analyzeForecastMinute(baseTime, minutes))
+    );
 
     state.snapshots = snapshots;
+    state.strongAlert = monitorResults.some((result) => result.hasStrongRain);
     renderForecast(snapshots);
     setActiveFrame(state.activeIndex, true);
     setUpdatedTime(new Date());
@@ -160,67 +157,41 @@ async function refreshWeather() {
   }
 }
 
-function collectFrames(payload) {
-  const pastFrames = (payload?.radar?.past || []).map((frame) => ({
-    ...frame,
-    kind: "past",
-  }));
-
-  const nowcastFrames = (payload?.radar?.nowcast || []).map((frame) => ({
-    ...frame,
-    kind: "nowcast",
-  }));
-
-  return [...pastFrames, ...nowcastFrames].sort((a, b) => a.time - b.time);
-}
-
-async function buildSnapshot(slot, frames, host) {
-  const frame = pickFrameForTime(frames, slot.minutes);
-  const signal = await analyzeFrame(frame, host);
+async function buildSnapshot(slot, baseTime) {
+  const validTime = addMinutesUtc(baseTime, slot.minutes);
+  const analysis = await analyzeAtTime(baseTime, validTime);
 
   return {
     slot,
-    frame,
-    signal,
+    baseTimeId: formatJmaTimestamp(baseTime),
+    validTimeId: formatJmaTimestamp(validTime),
+    signal: analysis.signal,
   };
 }
 
-function pickFrameForTime(frames, minutesAhead) {
-  const nowSeconds = Date.now() / 1000;
-  const targetSeconds = nowSeconds + minutesAhead * 60;
+async function analyzeForecastMinute(baseTime, minutesAhead) {
+  const validTime = addMinutesUtc(baseTime, minutesAhead);
+  const analysis = await analyzeAtTime(baseTime, validTime);
 
-  const candidates =
-    minutesAhead > 0
-      ? frames.filter((frame) => frame.kind === "nowcast")
-      : frames;
-
-  const pool = candidates.length ? candidates : frames;
-
-  return pool.reduce((best, frame) => {
-    if (!best) {
-      return frame;
-    }
-
-    const bestDiff = Math.abs(best.time - targetSeconds);
-    const currentDiff = Math.abs(frame.time - targetSeconds);
-
-    return currentDiff < bestDiff ? frame : best;
-  }, null);
+  return {
+    minutesAhead,
+    ...analysis,
+  };
 }
 
-async function analyzeFrame(frame, host) {
+async function analyzeAtTime(baseTime, validTime) {
   const analysis = getAnalysisPoints();
   const sampleResults = await Promise.all(
-    analysis.points.map((point) => samplePointFromFrame(frame, host, point))
+    analysis.points.map((point) => samplePointAtTime(baseTime, validTime, point))
   );
 
   state.analysisMode = analysis.mode;
 
   if (analysis.mode === "current") {
-    return pickSignalForCurrentLocation(sampleResults);
+    return summarizeCurrentLocation(sampleResults);
   }
 
-  return pickSignalForRegion(sampleResults);
+  return summarizeRegion(sampleResults);
 }
 
 function getAnalysisPoints() {
@@ -246,48 +217,63 @@ function getAnalysisPoints() {
   };
 }
 
-function pickSignalForRegion(sampleResults) {
-  const strongest = Math.max(...sampleResults.map((result) => result.rank));
-  const mediumCount = sampleResults.filter((result) => result.rank >= 1).length;
-  const strongCount = sampleResults.filter((result) => result.rank >= 2).length;
+function summarizeRegion(sampleResults) {
+  const levels = sampleResults.map((result) => result.level);
+  const strongest = Math.max(...levels);
+  const wetCount = levels.filter((level) => level >= 1).length;
+  const strongCount = levels.filter((level) => level >= 3).length;
 
-  if (strongest >= 2 && strongCount >= 1) {
-    return "rain";
+  let signal = "safe";
+
+  if (strongest >= 2) {
+    signal = "rain";
+  } else if (wetCount >= 2 || strongest >= 1) {
+    signal = "soon";
   }
 
-  if (mediumCount >= 2) {
-    return "soon";
-  }
-
-  return strongest >= 1 ? "soon" : "safe";
+  return {
+    signal,
+    strongestLevel: strongest,
+    hasStrongRain: strongCount >= 1,
+  };
 }
 
-function pickSignalForCurrentLocation(sampleResults) {
+function summarizeCurrentLocation(sampleResults) {
   const [center, ...surroundings] = sampleResults;
-  const nearbyWet = surroundings.filter((result) => result.rank >= 1).length;
-  const nearbyStrong = surroundings.filter((result) => result.rank >= 2).length;
+  const nearbyWet = surroundings.filter((result) => result.level >= 1).length;
+  const nearbyStrong = surroundings.filter((result) => result.level >= 3).length;
 
-  if (center.rank >= 2) {
-    return "rain";
+  let signal = "safe";
+
+  if (center.level >= 2) {
+    signal = "rain";
+  } else if (center.level >= 1 || nearbyWet >= 2 || nearbyStrong >= 1) {
+    signal = "soon";
   }
 
-  if (center.rank >= 1 || nearbyStrong >= 1 || nearbyWet >= 2) {
-    return "soon";
-  }
-
-  return "safe";
+  return {
+    signal,
+    strongestLevel: Math.max(center.level, ...surroundings.map((result) => result.level)),
+    hasStrongRain: center.level >= 3 || nearbyStrong >= 1,
+  };
 }
 
-async function samplePointFromFrame(frame, host, point) {
+async function samplePointAtTime(baseTime, validTime, point) {
   const { tileX, tileY, pixelX, pixelY } = latLonToTile(
     point.lat,
     point.lon,
     APP_CONFIG.analysisZoom
   );
-  const canvas = await getTileCanvas(frame, host, APP_CONFIG.analysisZoom, tileX, tileY);
+  const canvas = await getTileCanvas(
+    formatJmaTimestamp(baseTime),
+    formatJmaTimestamp(validTime),
+    APP_CONFIG.analysisZoom,
+    tileX,
+    tileY
+  );
   const context = canvas.getContext("2d", { willReadFrequently: true });
   const pixel = context.getImageData(pixelX, pixelY, 1, 1).data;
-  return classifyPixel(pixel);
+  return classifyPrecipitation(pixel);
 }
 
 function latLonToTile(lat, lon, zoom) {
@@ -308,14 +294,14 @@ function latLonToTile(lat, lon, zoom) {
   };
 }
 
-async function getTileCanvas(frame, host, zoom, tileX, tileY) {
-  const key = `${frame.path}-${zoom}-${tileX}-${tileY}`;
+async function getTileCanvas(baseTimeId, validTimeId, zoom, tileX, tileY) {
+  const key = `${baseTimeId}-${validTimeId}-${zoom}-${tileX}-${tileY}`;
 
   if (state.tileCache.has(key)) {
     return state.tileCache.get(key);
   }
 
-  const url = `${host}${frame.path}/256/${zoom}/${tileX}/${tileY}/2/0_0.png`;
+  const url = buildJmaTileUrl(baseTimeId, validTimeId, zoom, tileX, tileY);
   const response = await fetch(url, { cache: "force-cache" });
 
   if (response.status === 404) {
@@ -349,24 +335,30 @@ function createTransparentCanvas() {
   return canvas;
 }
 
-function classifyPixel(pixel) {
+function classifyPrecipitation(pixel) {
   const [red, green, blue, alpha] = pixel;
 
-  if (alpha < 20) {
-    return SIGNAL_META.safe;
+  if (alpha < 12) {
+    return { level: 0 };
   }
 
-  const warmth = red - blue;
-
-  if ((red > 160 && green < 140) || alpha > 180 || warmth > 120) {
-    return SIGNAL_META.rain;
+  if ((red >= 150 && blue >= 120 && green < 130) || (red >= 220 && green < 110)) {
+    return { level: 4 };
   }
 
-  if (green > 120 || red > 130 || alpha > 70) {
-    return SIGNAL_META.soon;
+  if (red >= 210 && green >= 120 && blue < 120) {
+    return { level: 3 };
   }
 
-  return SIGNAL_META.safe;
+  if ((red >= 170 && green >= 150) || (red >= 120 && green >= 120 && blue < 120)) {
+    return { level: 2 };
+  }
+
+  if (blue >= 120 || green >= 120 || alpha >= 40) {
+    return { level: 1 };
+  }
+
+  return { level: 0 };
 }
 
 function renderForecast(snapshots) {
@@ -432,15 +424,18 @@ function buildStatusLine(pattern, snapshots) {
 }
 
 function renderLocationInfo(pattern, snapshots) {
+  const warningSuffix = state.strongAlert ? " ※ゲリラ豪雨（強い雨）が来そう！！" : "";
+
   if (state.userLocation) {
     dom.locationLabel.textContent = "現在地ピンポイント";
-    dom.locationText.textContent = buildLocationLine(pattern, snapshots);
+    dom.locationText.textContent = `${buildLocationLine(pattern, snapshots)}${warningSuffix}`;
     dom.useLocationButton.textContent = "現在地を更新";
     return;
   }
 
   dom.locationLabel.textContent = "広域モード";
-  dom.locationText.textContent = "現在地を使うと、この場所で雨が降るかどうかをピンポイントで見られます。";
+  dom.locationText.textContent =
+    `現在地を使うと、この場所で雨が降るかどうかをピンポイントで見られます。${warningSuffix}`;
   dom.useLocationButton.textContent = "現在地を使う";
 }
 
@@ -483,11 +478,11 @@ function setActiveFrame(index, keepIfOutOfRange = false) {
 
   const snapshot = state.snapshots[index];
   dom.mapFrameLabel.textContent = `地図: ${snapshot.slot.label}`;
-  updateRadarLayer(snapshot.frame);
+  updateRadarLayer(snapshot);
 }
 
-function updateRadarLayer(frame) {
-  if (!state.map || !frame) {
+function updateRadarLayer(snapshot) {
+  if (!state.map || !snapshot) {
     return;
   }
 
@@ -496,12 +491,16 @@ function updateRadarLayer(frame) {
   }
 
   state.radarLayer = L.tileLayer(
-    `${state.frameHost}${frame.path}/256/{z}/{x}/{y}/2/0_0.png`,
+    `${APP_CONFIG.jmaTileBaseUrl}/${snapshot.baseTimeId}/none/${snapshot.validTimeId}/surf/hrpns/{z}/{x}/{y}.png`,
     {
       opacity: 0.58,
-      maxZoom: 18,
+      maxNativeZoom: 10,
+      maxZoom: 20,
+      updateWhenIdle: false,
+      keepBuffer: 4,
+      crossOrigin: true,
       errorTileUrl: TRANSPARENT_TILE_DATA_URL,
-      attribution: '&copy; <a href="https://www.rainviewer.com/">RainViewer</a>',
+      attribution: '&copy; <a href="https://www.jma.go.jp/">気象庁</a>',
     }
   );
 
@@ -511,7 +510,7 @@ function updateRadarLayer(frame) {
 function renderErrorState() {
   dom.avatarImage.src = AVATAR_PATTERNS.error.image;
   dom.avatarComment.textContent = AVATAR_PATTERNS.error.comment;
-  setStatus("地図は表示できますが、雨雲データの取得に失敗しました");
+  setStatus("気象庁ナウキャストの取得に失敗しました");
   dom.updatedAt.textContent = "最終更新: 取得失敗";
   dom.locationLabel.textContent = state.userLocation ? "現在地ピンポイント" : "広域モード";
   dom.locationText.textContent = "雨雲データを読めなかったため、いまは予測を更新できません。";
@@ -534,6 +533,26 @@ function setUpdatedTime(date) {
     minute: "2-digit",
   });
   dom.updatedAt.textContent = `最終更新: ${time}`;
+}
+
+function scheduleAutoRefresh() {
+  if (state.refreshTimer) {
+    window.clearTimeout(state.refreshTimer);
+  }
+
+  const now = new Date();
+  const currentMinutes = now.getUTCMinutes();
+  const nextMinutes = Math.floor(currentMinutes / 5) * 5 + 5;
+  const nextUpdate = new Date(now);
+
+  nextUpdate.setUTCMinutes(nextMinutes, APP_CONFIG.refreshLeadSeconds, 0);
+
+  const delay = Math.max(1000, nextUpdate.getTime() - now.getTime());
+
+  state.refreshTimer = window.setTimeout(() => {
+    refreshWeather();
+    scheduleAutoRefresh();
+  }, delay);
 }
 
 function setupLocation() {
@@ -589,4 +608,38 @@ function requestUserLocation(showLoading = true) {
       maximumAge: 10 * 60 * 1000,
     }
   );
+}
+
+function getLatestBaseTimeUtc() {
+  const now = new Date();
+
+  return new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      now.getUTCHours(),
+      Math.floor(now.getUTCMinutes() / 5) * 5,
+      0,
+      0
+    )
+  );
+}
+
+function addMinutesUtc(date, minutes) {
+  return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function formatJmaTimestamp(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+
+  return `${year}${month}${day}${hours}${minutes}00`;
+}
+
+function buildJmaTileUrl(baseTimeId, validTimeId, zoom, tileX, tileY) {
+  return `${APP_CONFIG.jmaTileBaseUrl}/${baseTimeId}/none/${validTimeId}/surf/hrpns/${zoom}/${tileX}/${tileY}.png`;
 }

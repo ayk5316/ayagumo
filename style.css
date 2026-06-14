@@ -37,9 +37,10 @@ textarea {
 }
 
 .app-shell {
-  width: min(100%, 460px);
+  width: 100%;
+  max-width: 480px;
   margin: 0 auto;
-  padding: 20px 16px 28px;
+  padding: 18px 16px 28px;
 }
 
 .app-brand {
@@ -78,11 +79,12 @@ textarea {
 }
 
 .hero-card {
-  display: grid;
-  grid-template-columns: 112px 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   align-items: center;
   padding: 18px;
+  text-align: center;
 }
 
 .avatar-wrap {
@@ -100,37 +102,49 @@ textarea {
 }
 
 .hero-copy {
+  width: 100%;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .eyebrow {
   margin: 0 0 10px;
+  width: 100%;
   color: var(--muted);
   font-size: 12px;
   letter-spacing: 0.08em;
+  line-height: 1.6;
 }
 
 .speech {
+  width: 100%;
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: 22px;
-  min-height: 74px;
+  min-height: auto;
   display: flex;
   align-items: center;
+  justify-content: center;
 }
 
 .speech p {
+  width: 100%;
   margin: 0;
   font-size: 22px;
   line-height: 1.45;
   letter-spacing: 0.02em;
-  word-break: keep-all;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 
 .location-panel {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 12px;
   margin-top: 12px;
   padding: 12px 14px;
@@ -140,6 +154,7 @@ textarea {
 }
 
 .location-copy {
+  width: 100%;
   min-width: 0;
 }
 
@@ -158,13 +173,16 @@ textarea {
   margin-top: 4px;
   font-size: 13px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .meta-row,
 .section-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 12px;
 }
 
@@ -182,6 +200,7 @@ textarea {
   padding: 8px 14px;
   cursor: pointer;
   transition: border-color 140ms ease, transform 140ms ease;
+  white-space: nowrap;
 }
 
 .ghost-button:hover,
@@ -216,14 +235,16 @@ textarea {
 
 .section-head p {
   margin: 0;
+  width: 100%;
   color: var(--muted);
   font-size: 12px;
-  text-align: right;
+  line-height: 1.6;
+  text-align: left;
 }
 
 .timeline {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -236,6 +257,7 @@ textarea {
   text-align: center;
   cursor: pointer;
   transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+  min-width: 0;
 }
 
 .meter-item:hover,
@@ -314,28 +336,7 @@ textarea {
     width: min(100%, 132px);
   }
 
-  .hero-card {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    text-align: center;
-  }
-
-  .meta-row,
-  .section-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .location-panel {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .section-head p {
-    text-align: left;
-  }
-
-  .speech {
-    min-height: auto;
+  .timeline {
+    gap: 8px;
   }
 }
