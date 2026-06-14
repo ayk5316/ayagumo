@@ -495,6 +495,7 @@ function updateRadarLayer(snapshot) {
     {
       opacity: 0.58,
       maxNativeZoom: 10,
+      minNativeZoom: 4,
       maxZoom: 20,
       updateWhenIdle: false,
       keepBuffer: 4,
